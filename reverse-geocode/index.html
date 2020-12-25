@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.js"></script>
+
+    <script src="../assets/js/aws-sdk-specialized.js"></script>
+    <script src="../assets/js/debounce-throttle.js"></script>
+    <script src="https://unpkg.com/@aws-amplify/core@3.7.0/dist/aws-amplify-core.min.js"></script>
+  </head>
+  <body>
+    <div style="display: flex; width: 100%">
+      <div id="map" style="width: 100%; height: 500px"></div>
+      <div id="results" style="width: 100%"></div>
+    </div>
+    <script>
+      const { Signer } = window.aws_amplify_core;
+      // Cognito Identity Pool ID
+      const identityPoolId = "<region>:<identity-pool-id>";
+      const placeIndex = "SearchPlaceIndex";
+      const mapName = "SearchResultsMap";
+
+      AWS.config.region = identityPoolId.split(":")[0];
+      // instantiate a Cognito-backed credential provider
+      const credentials = new AWS.CognitoIdentityCredentials({
+        IdentityPoolId: identityPoolId,
+      });
+
+      async function refreshCredentials() {
+        await credentials.refreshPromise();
+        // schedule the next credential refresh when they're about to expire
+        setTimeout(refreshCredentials, credentials.expireTime - new Date());
+      }
+
+      const locationService = new AWS.Location({
+        credentials,
+        region: identityPoolId.split(":")[0],
+      });
+
+      function transformRequest(url, resourceType) {
+        if (resourceType === "Style" && !url.includes("://")) {
+          // resolve to an AWS URL
+          url = `https://maps.geo.${AWS.config.region}.amazonaws.com/maps/v0/maps/${url}/style-descriptor`;
+        }
+
+        if (url.includes("amazonaws.com")) {
+          // only sign AWS requests (with the signature as part of the query string)
+          return {
+            url: Signer.signUrl(url, {
+              access_key: credentials.accessKeyId,
+              secret_key: credentials.secretAccessKey,
+              session_token: credentials.sessionToken,
+            }),
+          };
+        }
+
+        // don't sign
+        return { url };
+      }
+
+      /**
+       * Initialize a map.
+       */
+      let map = null;
+      let draggableMarker = null;
+
+      async function initializeMap() {
+        // load credentials and set them up to refresh
+        await credentials.getPromise();
+
+        // actually initialize the map
+        map = new mapboxgl.Map({
+          container: "map",
+          center: [29.0085436, 41.0797291], // initial map centerpoint
+          zoom: 14, // initial map zoom
+          style: mapName,
+          transformRequest,
+        });
+
+        draggableMarker = new mapboxgl.Marker({
+          draggable: true,
+        })
+          .setLngLat([29.0085436, 41.0797291])
+          .addTo(map);
+
+        draggableMarker.on("dragend", () => {
+          const results = document.getElementById("results");
+          var lngLat = draggableMarker.getLngLat();
+          locationService.searchPlaceIndexForPosition(
+            {
+              IndexName: placeIndex,
+              Position: [lngLat.lng, lngLat.lat],
+            },
+            (err, response) => {
+              if (err) {
+                console.error(err);
+              } else {
+                results.innerHTML = "";
+                response.Results.forEach((place) => {
+                  let placeElement = document.createElement("a");
+                  placeElement.style.width = "100%";
+                  placeElement.style.display = "block";
+                  placeElement.style.fontSize = "30px";
+                  placeElement.textContent = place.Place.Label;
+                  results.appendChild(placeElement);
+                });
+              }
+            }
+          );
+        });
+      }
+
+      initializeMap();
+    </script>
+  </body>
+</html>

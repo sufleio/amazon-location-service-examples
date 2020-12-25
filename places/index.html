@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="../assets/js/aws-sdk-specialized.js"></script>
+    <script src="../assets/js/debounce-throttle.js"></script>
+  </head>
+  <body>
+    <input type="text" id="search-input" />
+    <div id="results"></div>
+    <script>
+      // Cognito Identity Pool ID
+      const identityPoolId = "<region>:<identity-pool-id>";
+      const placeIndex = "SearchPlaceIndex";
+
+      AWS.config.region = identityPoolId.split(":")[0];
+      // instantiate a Cognito-backed credential provider
+      const credentials = new AWS.CognitoIdentityCredentials({
+        IdentityPoolId: identityPoolId,
+      });
+
+      async function refreshCredentials() {
+        await credentials.refreshPromise();
+        // schedule the next credential refresh when they're about to expire
+        setTimeout(refreshCredentials, credentials.expireTime - new Date());
+      }
+
+      const locationService = new AWS.Location({
+        credentials,
+        region: identityPoolId.split(':')[0]
+      });
+      
+      window.onload = () => {
+        const input = document.getElementById('search-input');
+        const results = document.getElementById("results");
+        input.addEventListener('change', _.debounce((e) => {
+          locationService.searchPlaceIndexForText({
+            IndexName: placeIndex,
+            Text: input.value
+          }, (err, response) => {
+            if (err) {
+              console.error(err);
+            } else {
+              results.innerHTML = "";
+              console.log(response);
+              response.Results.forEach(place => {
+                let placeElement = document.createElement("p");
+                placeElement.textContent = place.Place.Label;
+                results.appendChild(placeElement);
+              });
+            }
+          });
+        }, 500));
+      }
+    </script>
+  </body>
+</html>

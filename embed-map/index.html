@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- CSS dependencies -->
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <!-- JavaScript dependencies -->
+    <script src="https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.js"></script>
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.775.0.min.js"></script>
+    <script src="https://unpkg.com/@aws-amplify/core@3.7.0/dist/aws-amplify-core.min.js"></script>
+    <script>
+      const { Signer } = window.aws_amplify_core;
+
+      // Cognito Identity Pool ID
+      const identityPoolId = "<region>:<identity-pool-id>";
+      // Amazon Location Service Map name
+      const mapName = "SufleOfficeMap";
+      AWS.config.region = identityPoolId.split(":")[0];
+      // instantiate a Cognito-backed credential provider
+      const credentials = new AWS.CognitoIdentityCredentials({
+        IdentityPoolId: identityPoolId,
+      });
+
+      async function refreshCredentials() {
+        await credentials.refreshPromise();
+        // schedule the next credential refresh when they're about to expire
+        setTimeout(refreshCredentials, credentials.expireTime - new Date());
+      }
+
+      function transformRequest(url, resourceType) {
+        if (resourceType === "Style" && !url.includes("://")) {
+          // resolve to an AWS URL
+          url = `https://maps.geo.${AWS.config.region}.amazonaws.com/maps/v0/maps/${url}/style-descriptor`;
+        }
+
+        if (url.includes("amazonaws.com")) {
+          // only sign AWS requests (with the signature as part of the query string)
+          return {
+            url: Signer.signUrl(url, {
+              access_key: credentials.accessKeyId,
+              secret_key: credentials.secretAccessKey,
+              session_token: credentials.sessionToken,
+            }),
+          };
+        }
+
+        // don't sign
+        return { url };
+      }
+
+      /**
+       * Initialize a map.
+       */
+      async function initializeMap() {
+        // load credentials and set them up to refresh
+        await credentials.getPromise();
+
+        // actually initialize the map
+        const map = new mapboxgl.Map({
+          container: "map",
+          center: [29.0085436, 41.0797291], // initial map centerpoint
+          zoom: 17, // initial map zoom
+          style: mapName,
+          transformRequest,
+        });
+
+        var marker = new mapboxgl.Marker()
+          .setLngLat([29.0085436, 41.0797291])
+          .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML("<img style='max-width: 80px;' src='https://www.sufle.io/img/logo.svg' />"))
+          .addTo(map);
+
+      }
+
+      initializeMap();
+    </script>
+  </head>
+  <body>
+    <div style="width: 600px; height: 400px" id="map"></div>
+  </body>
+</html>
